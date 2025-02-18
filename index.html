@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login with Human Detection</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }
+        .container { width: 300px; margin: auto; }
+        input { width: 100%; padding: 10px; margin: 10px 0; }
+        button { width: 100%; padding: 10px; cursor: pointer; }    
+        canvas { border: 1px solid black; margin-top: 20px; display: block; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Login</h2>
+        <form id="loginForm">
+            <input type="text" id="username" placeholder="Username" required>
+            <input type="password" id="password" placeholder="Password" required>
+            <button type="submit" id="loginButton">Login</button>
+        </form>
+        <p id="status"></p>
+        <p id="mouseDataLength">Mouse moves: 0</p>
+        <p id="avgDeviation">avgDeviation: 0</p>
+        <canvas id="mouseCanvas" width="400" height="300"></canvas>
+    </div>
+
+    <script>
+        //stores mousemove events
+        let mouseData = [];
+
+        //stores keydown events
+        let keypressTimes = [];
+        let lastClickTime = 0;
+
+        let canvas = document.getElementById("mouseCanvas");
+        let ctx = canvas.getContext("2d");
+
+        document.addEventListener("mousemove", (event) => {
+            if (mouseData.length > 0) {
+                // last mouse move event
+                let last = mouseData[mouseData.length - 1];
+
+                //calculate the diffenece between the last and current mouse x and y
+                let dx = event.clientX - last.x;
+                let dy = event.clientY - last.y;
+
+                //calculates the Euclidean distance between two points
+                let distance = Math.hypot(dx, dy);
+
+                //calculates the time difference between the last and current mouse move event
+                let timeDiff = Date.now() - last.time;
+
+                //calculates the speed of the mouse move event
+                let speed = distance / (timeDiff || 1);
+
+                //add to mouse data array
+                mouseData.push({ x: event.clientX, y: event.clientY, time: Date.now(), speed, dx, dy });
+            } else {
+                //add first mouse move event
+                mouseData.push({ x: event.clientX, y: event.clientY, time: Date.now(), speed: 0, dx: 0, dy: 0 });
+            }
+            drawMousePath();
+        });
+
+        document.addEventListener("keydown", () => {
+            keypressTimes.push(Date.now());
+        });
+
+        //checks if there are two clicks within 50ms or clicks after the site loads
+        document.addEventListener("click", (event) => {
+            let now = Date.now();
+            if (lastClickTime > 0 && (now - lastClickTime < 50)) {
+                console.log("Click without delay detected!");
+            }
+            lastClickTime = now;
+        });
+
+        function drawMousePath() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.beginPath();
+            ctx.strokeStyle = "blue";
+            ctx.lineWidth = 2;
+
+            if (mouseData.length > 1) {
+                ctx.moveTo(mouseData[0].x - canvas.offsetLeft, mouseData[0].y - canvas.offsetTop);
+                for (let i = 1; i < mouseData.length; i++) {
+                    ctx.lineTo(mouseData[i].x - canvas.offsetLeft, mouseData[i].y - canvas.offsetTop);
+                }
+                ctx.stroke();
+            }
+        }
+        
+        function analyzeMouseBehavior() {
+            // Not enough mouse data to analyze
+            if (mouseData.length < 10) return true;
+
+            let totalAngleChange = 0;
+            let fastMovements = 0;
+            let smoothMovements = 0;
+            let straightMovements = 0;
+
+            for (let i = 2; i < mouseData.length; i++) {
+                let p1 = mouseData[i - 2];
+                let p2 = mouseData[i - 1];
+                let p3 = mouseData[i];
+
+                //angle between p1 and p2
+                let angle1 = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+                
+                //angle between p2 and p3
+                let angle2 = Math.atan2(p3.y - p2.y, p3.x - p2.x);
+
+                //amount of angle change between p1, p2 and p3
+                let angleChange = Math.abs(angle2 - angle1);
+
+                totalAngleChange += angleChange;
+
+                //speed of the mouse move between p2 and p3
+                let distance = Math.hypot(p3.x - p2.x, p3.y - p2.y);
+                let speed = distance / ((p3.time - p2.time) || 1);
+
+                if (speed > 2) fastMovements++; // Detects unnatural fast jumps
+                if (angleChange < 0.05) smoothMovements++; // Too smooth is suspicious
+                if (Math.abs(p3.dx) < 1 && Math.abs(p3.dy) < 1) straightMovements++; //checks if the mouse move is in a straight line
+
+            }
+
+            let avgAngleChange = totalAngleChange / (mouseData.length - 2);
+            
+            console.log(`Fast Movements: ${fastMovements}, Smooth Movements: ${smoothMovements}, Avg Angle Change: ${avgAngleChange}, Straight Movements: ${straightMovements}`);
+            console.log(fastMovements > 5)
+            console.log(avgAngleChange > 1.5)
+            console.log(smoothMovements > (mouseData.length * 0.9))
+            console.log(straightMovements > (mouseData.length * 0.7))
+            return fastMovements > 5 || avgAngleChange > 1.5 || smoothMovements > (mouseData.length * 0.9) || straightMovements > (mouseData.length * 0.7);
+        }
+
+        function calculatePathCurviness() {
+            if (mouseData.length < 2) return 1; // Not enough data
+
+            let totalPathLength = 0;
+            for (let i = 1; i < mouseData.length; i++) {
+                let p1 = mouseData[i - 1];
+                let p2 = mouseData[i];
+                totalPathLength += Math.hypot(p2.x - p1.x, p2.y - p1.y);
+            }
+
+            let start = mouseData[0];
+            let end = mouseData[mouseData.length - 1];
+            let euclideanDistance = Math.hypot(end.x - start.x, end.y - start.y);
+
+            let pathCurvinessRatio = totalPathLength / euclideanDistance;
+            return pathCurvinessRatio; // Closer to 1 = more straight, higher = more curvy
+        }
+        //calculates type speed 
+        function analyzeTypingBehavior() {
+            console.log('this is keypressTimes', keypressTimes.length)
+            if (keypressTimes.length < 5) return true; // Not enough keystrokes to analyze
+
+            let avgTimeBetweenKeystrokes = 0;
+            for (let i = 1; i < keypressTimes.length; i++) {
+                avgTimeBetweenKeystrokes += keypressTimes[i] - keypressTimes[i - 1];
+            }
+            avgTimeBetweenKeystrokes /= keypressTimes.length - 1;
+
+            console.log(`Avg typing delay: ${avgTimeBetweenKeystrokes}ms`);
+
+            return avgTimeBetweenKeystrokes < 50; // Bots often type unrealistically fast
+        }
+
+        document.getElementById("loginForm").addEventListener("submit", function(event) {
+            event.preventDefault();
+            console.log('this is curviness ratio', calculatePathCurviness(mouseData))
+            let isBotMouse = analyzeMouseBehavior();
+            let isBotTyping = analyzeTypingBehavior();
+            let curvinessRatio = calculatePathCurviness(mouseData);
+            let isBotClicking = lastClickTime === 0; // No clicks detected at all is suspicious
+
+            let isBot = isBotMouse || isBotTyping || isBotClicking;
+
+            let statusText = document.getElementById("status");
+
+            if (isBot) {
+                statusText.innerHTML = "❌ Bot detected! Access denied.";
+            } else {
+                statusText.innerHTML = "✅ Human detected! Logging in...";
+            }
+            console.log(mouseData)
+            document.getElementById("mouseDataLength").innerHTML = `Mouse moves: ${mouseData.length}`;
+        });
+    </script>
+</body>
+</html>
