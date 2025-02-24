@@ -21,33 +21,27 @@
             <button type="submit" id="loginButton">Login</button>
         </form>
         <p id="status"></p>
-        <p id="mouseDataLength">Mouse moves: 0</p>
-        <p id="avgDeviation">avgDeviation: 0</p>
-        <canvas id="mouseCanvas" width="400" height="300"></canvas>
+        <p id="mousemoveDataLength">Mouse moves: 0</p>
     </div>
 
     <script>
         //stores mousemove events
-        let mouseData = [];
+        let mousemoveData = [];
 
         //stores keydown events
         let keypressTimes = [];
         let lastClickTime = 0;
 
-        let canvas = document.getElementById("mouseCanvas");
-        let ctx = canvas.getContext("2d");
-
+        //record x,y,time and speed 
         document.addEventListener("mousemove", (event) => {
-            if (mouseData.length > 0) {
-                // last mouse move event
-                let last = mouseData[mouseData.length - 1];
-
-                //calculate the diffenece between the last and current mouse x and y
-                let dx = event.clientX - last.x;
-                let dy = event.clientY - last.y;
-
-                //calculates the Euclidean distance between two points
-                let distance = Math.hypot(dx, dy);
+            if (mousemoveData.length > 0) {
+                // calculate distance between new mouse position and last mouse position
+                let last = mousemoveData[mousemoveData.length - 1];
+                let xDistance = event.clientX - last.x;
+                console.log('xDistance: ',xDistance)
+                let yDistance = event.clientY - last.y;
+                console.log('yDistance: ',yDistance)
+                let distance = Math.hypot(xDistance, yDistance);
 
                 //calculates the time difference between the last and current mouse move event
                 let timeDiff = Date.now() - last.time;
@@ -56,17 +50,18 @@
                 let speed = distance / (timeDiff || 1);
 
                 //add to mouse data array
-                mouseData.push({ x: event.clientX, y: event.clientY, time: Date.now(), speed, dx, dy });
+                mousemoveData.push({ x: event.clientX, y: event.clientY, time: Date.now(), speed});
             } else {
                 //add first mouse move event
-                mouseData.push({ x: event.clientX, y: event.clientY, time: Date.now(), speed: 0, dx: 0, dy: 0 });
+                mousemoveData.push({ x: event.clientX, y: event.clientY, time: Date.now(), speed: 0});
             }
-            drawMousePath();
         });
 
+        //record time of each keydown event
         document.addEventListener("keydown", () => {
             keypressTimes.push(Date.now());
         });
+
 
         //checks if there are two clicks within 50ms or clicks after the site loads
         document.addEventListener("click", (event) => {
@@ -77,83 +72,93 @@
             lastClickTime = now;
         });
 
-        function drawMousePath() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.beginPath();
-            ctx.strokeStyle = "blue";
-            ctx.lineWidth = 2;
 
-            if (mouseData.length > 1) {
-                ctx.moveTo(mouseData[0].x - canvas.offsetLeft, mouseData[0].y - canvas.offsetTop);
-                for (let i = 1; i < mouseData.length; i++) {
-                    ctx.lineTo(mouseData[i].x - canvas.offsetLeft, mouseData[i].y - canvas.offsetTop);
+        // Draw mouse path and save as an image
+        function exportMousePathImage() {
+            const width = 800;
+            const height = 600;
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+
+            // Draw background
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, width, height);
+
+            // Draw mouse path
+            ctx.strokeStyle = 'blue';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+
+            if (mousemoveData.length > 1) {
+                ctx.moveTo(mousemoveData[0].x, mousemoveData[0].y);
+                for (let i = 1; i < mousemoveData.length; i++) {
+                    ctx.lineTo(mousemoveData[i].x, mousemoveData[i].y);
                 }
                 ctx.stroke();
             }
+
+            // Convert the canvas to a data URL (image)
+            const imageURL = canvas.toDataURL('image/png');
+
+            // Trigger a download of the image
+            const link = document.createElement('a');
+            link.href = imageURL;
+            link.download = 'mouse_path.png';
+            link.click();
         }
+
         
         function analyzeMouseBehavior() {
-            // Not enough mouse data to analyze
-            if (mouseData.length < 10) return true;
+            let straightSpots = 0;
+            let straightLines = 0;
+            let sharpAngles = 0;
 
-            let totalAngleChange = 0;
-            let fastMovements = 0;
-            let smoothMovements = 0;
-            let straightMovements = 0;
+            for (let i = 2; i < mousemoveData.length; i++) {
+                let p1 = mousemoveData[i - 2];
+                let p2 = mousemoveData[i - 1];
+                let p3 = mousemoveData[i];
 
-            for (let i = 2; i < mouseData.length; i++) {
-                let p1 = mouseData[i - 2];
-                let p2 = mouseData[i - 1];
-                let p3 = mouseData[i];
+                // Calculate angles in degrees
+                let angle1 = (Math.atan2(p2.y - p1.y, p2.x - p1.x)) * (180 / Math.PI);
+                let angle2 = (Math.atan2(p3.y - p2.y, p3.x - p2.x)) * (180 / Math.PI);
 
-                //angle between p1 and p2
-                let angle1 = Math.atan2(p2.y - p1.y, p2.x - p1.x);
-                
-                //angle between p2 and p3
-                let angle2 = Math.atan2(p3.y - p2.y, p3.x - p2.x);
-
-                //amount of angle change between p1, p2 and p3
                 let angleChange = Math.abs(angle2 - angle1);
 
-                totalAngleChange += angleChange;
+                // Normalize the angle to always return the smallest rotation
+                if (angleChange > 180) {
+                    angleChange = 360 - angleChange;
+                }
 
-                //speed of the mouse move between p2 and p3
-                let distance = Math.hypot(p3.x - p2.x, p3.y - p2.y);
-                let speed = distance / ((p3.time - p2.time) || 1);
+                // Detect straight spots (close to 0° change)
+                if (angleChange < 2) {  // Threshold for straightness
+                    straightSpots++;
+                    if (straightSpots > 5) {
+                        straightLines++;
+                        straightSpots = 0
+                    }
+                } else {
+                    straightSpots = 0;  // Reset if there's an angle change
+                }
 
-                if (speed > 2) fastMovements++; // Detects unnatural fast jumps
-                if (angleChange < 0.05) smoothMovements++; // Too smooth is suspicious
-                if (Math.abs(p3.dx) < 1 && Math.abs(p3.dy) < 1) straightMovements++; //checks if the mouse move is in a straight line
-
+                // Detect sharp angles (e.g., sudden turns > 160°)
+                if (angleChange > 160) {
+                    sharpAngles++;
+                }
             }
 
-            let avgAngleChange = totalAngleChange / (mouseData.length - 2);
-            
-            console.log(`Fast Movements: ${fastMovements}, Smooth Movements: ${smoothMovements}, Avg Angle Change: ${avgAngleChange}, Straight Movements: ${straightMovements}`);
-            console.log(fastMovements > 5)
-            console.log(avgAngleChange > 1.5)
-            console.log(smoothMovements > (mouseData.length * 0.9))
-            console.log(straightMovements > (mouseData.length * 0.7))
-            return fastMovements > 5 || avgAngleChange > 1.5 || smoothMovements > (mouseData.length * 0.9) || straightMovements > (mouseData.length * 0.7);
+            // Output for analysis
+            console.log(`Straight Lines: ${straightLines}`);
+            console.log(`Sharp Angles: ${sharpAngles}`);
+
+            // Detection criteria
+            let isBot =
+                straightLines > 3 ||  // Too many straight lines
+                sharpAngles > 5
+            return isBot
         }
 
-        function calculatePathCurviness() {
-            if (mouseData.length < 2) return 1; // Not enough data
-
-            let totalPathLength = 0;
-            for (let i = 1; i < mouseData.length; i++) {
-                let p1 = mouseData[i - 1];
-                let p2 = mouseData[i];
-                totalPathLength += Math.hypot(p2.x - p1.x, p2.y - p1.y);
-            }
-
-            let start = mouseData[0];
-            let end = mouseData[mouseData.length - 1];
-            let euclideanDistance = Math.hypot(end.x - start.x, end.y - start.y);
-
-            let pathCurvinessRatio = totalPathLength / euclideanDistance;
-            return pathCurvinessRatio; // Closer to 1 = more straight, higher = more curvy
-        }
         //calculates type speed 
         function analyzeTypingBehavior() {
             console.log('this is keypressTimes', keypressTimes.length)
@@ -172,13 +177,13 @@
 
         document.getElementById("loginForm").addEventListener("submit", function(event) {
             event.preventDefault();
-            console.log('this is curviness ratio', calculatePathCurviness(mouseData))
+            let mousemoveLength = mousemoveData.length < 10;
             let isBotMouse = analyzeMouseBehavior();
             let isBotTyping = analyzeTypingBehavior();
-            let curvinessRatio = calculatePathCurviness(mouseData);
+            console.log('this is last click time: ',lastClickTime)
             let isBotClicking = lastClickTime === 0; // No clicks detected at all is suspicious
 
-            let isBot = isBotMouse || isBotTyping || isBotClicking;
+            let isBot = isBotMouse || isBotTyping || isBotClicking || mousemoveLength;
 
             let statusText = document.getElementById("status");
 
@@ -187,8 +192,9 @@
             } else {
                 statusText.innerHTML = "✅ Human detected! Logging in...";
             }
-            console.log(mouseData)
-            document.getElementById("mouseDataLength").innerHTML = `Mouse moves: ${mouseData.length}`;
+            console.log(mousemoveData)
+            document.getElementById("mousemoveDataLength").innerHTML = `Mouse moves: ${mousemoveData.length}`;
+            exportMousePathImage();
         });
     </script>
 </body>
